@@ -6,7 +6,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/NamanG22/Redis/TCPEchoServer/config"
+	"github.com/NamanG22/Redis/config"
 )
 
 func respond(conn net.Conn, cmd string) error {

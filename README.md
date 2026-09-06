@@ -4,7 +4,7 @@ A from-scratch Redis clone. This repo starts with a TCP echo server — the netw
 
 ## Current status
 
-`TCPEchoServer` is a **synchronous TCP echo server**:
+This repo is a **synchronous TCP echo server**:
 
 - Listens on `0.0.0.0:7379` by default (same port family as Redis, offset so it does not collide with a real Redis on `6379`)
 - Accepts one connection at a time (the accept loop is blocked while a client is being served)
@@ -16,11 +16,10 @@ There is no RESP parsing, persistence, or Redis commands yet.
 ## Layout
 
 ```
-TCPEchoServer/
-  main.go              # flags and process entry
-  config/config.go     # host and port
-  server/sync_tcp.go   # listen, accept, echo loop
-  go.mod
+main.go              # flags and process entry
+config/config.go     # host and port
+server/sync_tcp.go   # listen, accept, echo loop
+go.mod
 ```
 
 ## Prerequisites
@@ -32,7 +31,6 @@ TCPEchoServer/
 From the repo root:
 
 ```bash
-cd TCPEchoServer
 go run .
 ```
 

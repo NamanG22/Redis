@@ -4,8 +4,8 @@ import (
 	"flag"
 	"log"
 
-	"github.com/NamanG22/Redis/TCPEchoServer/config"
-	"github.com/NamanG22/Redis/TCPEchoServer/server"
+	"github.com/NamanG22/Redis/config"
+	"github.com/NamanG22/Redis/server"
 )
 
 func setupFlags() {
