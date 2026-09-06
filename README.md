@@ -1,17 +1,25 @@
 # Redis
 
-A from-scratch Redis clone. This repo starts with a TCP echo server — the networking layer Redis sits on — before protocol parsing, commands, and storage. The long-term target is a Java Redis server; this first slice is in Go so the socket model is small and easy to inspect.
+A from-scratch Redis clone. This repo starts with a TCP echo server — the networking layer Redis sits on — then protocol parsing, commands, and storage. The long-term target is a Java Redis server; this first slice is in Go so the socket model is small and easy to inspect.
 
 ## Current status
 
-This repo is a **synchronous TCP echo server**:
+Two pieces are in place, not yet wired together:
+
+**Synchronous TCP echo server**
 
 - Listens on `0.0.0.0:7379` by default (same port family as Redis, offset so it does not collide with a real Redis on `6379`)
 - Accepts one connection at a time (the accept loop is blocked while a client is being served)
 - Reads up to 512 bytes from the client and writes the same bytes back
 - Logs connect, disconnect, and each received payload
 
-There is no RESP parsing, persistence, or Redis commands yet.
+**RESP decoder** (`core.Decode` / `core.DecodeOne`)
+
+- Parses simple strings (`+`), errors (`-`), integers (`:`), bulk strings (`$`), and arrays (`*`), including nested arrays
+- Returns the Go value and, for `DecodeOne`, how many bytes were consumed
+- Not yet used by the TCP server (the socket path still echoes raw bytes)
+
+There is no persistence or Redis command set yet.
 
 ## Layout
 
@@ -19,6 +27,8 @@ There is no RESP parsing, persistence, or Redis commands yet.
 main.go              # flags and process entry
 config/config.go     # host and port
 server/sync_tcp.go   # listen, accept, echo loop
+core/resp.go         # RESP decode
+core/resp_test.go    # table-driven decode tests
 go.mod
 ```
 
@@ -64,8 +74,14 @@ Flags:
 | `-host`  | `0.0.0.0` | bind address |
 | `-port`  | `7379`    | bind port    |
 
+## Test
+
+```bash
+go test ./core/
+```
+
 ## What comes next
 
-1. Keep the TCP accept/read/write path, then parse Redis Serialization Protocol (RESP)
+1. Feed accepted bytes through `core.Decode` instead of echoing them raw
 2. Implement a small command set (`PING`, `GET`, `SET`, …)
 3. Rebuild the same server in Java
