@@ -5,24 +5,41 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/NamanG22/Redis/config"
+	"github.com/NamanG22/Redis/core"
 )
 
-func respond(conn net.Conn, cmd string) error {
-	if _, err := conn.Write([]byte(cmd)); err != nil {
-		return err
-	}
-	return nil
+func respondError(err error, conn net.Conn) {
+	conn.Write([]byte(fmt.Sprintf("-%s\r\n", err)))
 }
 
-func readCommand(conn net.Conn) (string, error) {
+func respond(conn net.Conn, cmd *core.RedisCmd) {
+	log.Println("Command received2:", cmd)
+	err := core.EvalAndRespond(cmd, conn)
+	if err != nil {
+		respondError(err, conn)
+	}
+}
+
+func readCommand(conn net.Conn) (*core.RedisCmd, error) {
 	var buf []byte = make([]byte, 512)
 	n, err := conn.Read(buf[:]) // system call to read from the network socket, blocks until data is available
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(buf[:n]), nil
+
+	tokens, err := core.DecodeArrayString(buf[:n])
+	if err != nil {
+		return nil, err
+	}
+
+	return &core.RedisCmd{
+		Command: strings.ToUpper(tokens[0]),
+		Args:    tokens[1:],
+	}, nil
+	
 }
 
 func RunSyncTCPServer() {
@@ -55,10 +72,7 @@ func RunSyncTCPServer() {
 				}
 				log.Println("Error reading command:", err)
 			}
-			log.Println("Command received:", cmd)
-			if err = respond(conn, cmd); err != nil {
-				log.Println("Error responding to client:", err)
-			}
+			respond(conn, cmd);
 		}
 	}
 

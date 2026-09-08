@@ -1,33 +1,40 @@
 # Redis
 
-A from-scratch Redis clone. This repo starts with a TCP echo server — the networking layer Redis sits on — then protocol parsing, commands, and storage. The long-term target is a Java Redis server; this first slice is in Go so the socket model is small and easy to inspect.
+A from-scratch Redis clone. This repo starts with a TCP server — the networking layer Redis sits on — then protocol parsing, commands, and storage. The long-term target is a Java Redis server; this first slice is in Go so the socket model is small and easy to inspect.
 
 ## Current status
 
-Two pieces are in place, not yet wired together:
+The TCP path, RESP codec, and first command are wired together:
 
-**Synchronous TCP echo server**
+**Synchronous TCP server**
 
 - Listens on `0.0.0.0:7379` by default (same port family as Redis, offset so it does not collide with a real Redis on `6379`)
 - Accepts one connection at a time (the accept loop is blocked while a client is being served)
-- Reads up to 512 bytes from the client and writes the same bytes back
-- Logs connect, disconnect, and each received payload
+- Reads a RESP array from the client, turns it into a `RedisCmd`, evaluates it, and writes a RESP reply
 
-**RESP decoder** (`core.Decode` / `core.DecodeOne`)
+**RESP codec** (`core.Decode` / `core.DecodeOne` / `core.Encode`)
 
 - Parses simple strings (`+`), errors (`-`), integers (`:`), bulk strings (`$`), and arrays (`*`), including nested arrays
-- Returns the Go value and, for `DecodeOne`, how many bytes were consumed
-- Not yet used by the TCP server (the socket path still echoes raw bytes)
+- `DecodeArrayString` flattens a RESP array into `[]string` for command tokens
+- `Encode` writes simple strings (`+PONG`) and bulk strings (`$5\r\nhello\r\n`)
 
-There is no persistence or Redis command set yet.
+**Commands**
+
+- `PING` → `+PONG`
+- `PING <message>` → bulk-string echo of `<message>`
+- Wrong arity for `PING` → RESP error
+
+There is no key-value store, persistence, or further command set yet.
 
 ## Layout
 
 ```
 main.go              # flags and process entry
 config/config.go     # host and port
-server/sync_tcp.go   # listen, accept, echo loop
-core/resp.go         # RESP decode
+server/sync_tcp.go   # listen, accept, decode, respond
+core/cmd.go          # RedisCmd (command + args)
+core/eval.go         # command dispatch (PING)
+core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
 go.mod
 ```
@@ -59,13 +66,29 @@ Starting synchronous TCP server on 0.0.0.0 7379
 
 ## Try it
 
-In another terminal:
+The server speaks RESP, so a Redis client works:
 
 ```bash
-nc 127.0.0.1 7379
+redis-cli -p 7379 PING
 ```
 
-Type a line and press enter. The server echoes it back. Disconnect with `Ctrl-D` (or close the client); the server then accepts the next connection.
+Expected: `PONG`
+
+```bash
+redis-cli -p 7379 PING hello
+```
+
+Expected: `hello`
+
+Or raw RESP over `nc`:
+
+```bash
+printf '*1\r\n$4\r\nPING\r\n' | nc 127.0.0.1 7379
+```
+
+Expected: `+PONG`
+
+Disconnect with `Ctrl-D` (or close the client); the server then accepts the next connection.
 
 Flags:
 
@@ -82,6 +105,6 @@ go test ./core/
 
 ## What comes next
 
-1. Feed accepted bytes through `core.Decode` instead of echoing them raw
-2. Implement a small command set (`PING`, `GET`, `SET`, …)
+1. Implement a small command set (`GET`, `SET`, …) and reject unknown commands
+2. Add an in-memory store
 3. Rebuild the same server in Java
