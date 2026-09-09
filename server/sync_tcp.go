@@ -3,27 +3,27 @@ package server
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
+	"log"
+	"strconv"
 	"strings"
 
 	"github.com/NamanG22/Redis/config"
 	"github.com/NamanG22/Redis/core"
 )
 
-func respondError(err error, conn net.Conn) {
+func respondError(err error, conn io.ReadWriter) {
 	conn.Write([]byte(fmt.Sprintf("-%s\r\n", err)))
 }
 
-func respond(conn net.Conn, cmd *core.RedisCmd) {
-	log.Println("Command received2:", cmd)
+func respond(conn io.ReadWriter, cmd *core.RedisCmd) {
 	err := core.EvalAndRespond(cmd, conn)
 	if err != nil {
 		respondError(err, conn)
 	}
 }
 
-func readCommand(conn net.Conn) (*core.RedisCmd, error) {
+func readCommand(conn io.ReadWriter) (*core.RedisCmd, error) {
 	var buf []byte = make([]byte, 512)
 	n, err := conn.Read(buf[:]) // system call to read from the network socket, blocks until data is available
 	if err != nil {
@@ -47,30 +47,28 @@ func RunSyncTCPServer() {
 
 	var con_clients int = 0
 
-	lsnr, err := net.Listen("tcp", fmt.Sprintf("%s:%d", config.Host, config.Port)) // instance of the server socket
+	lsnr, err := net.Listen("tcp", config.Host + ":" + strconv.Itoa(config.Port))// instance of the server socket
 	if err != nil {
-		panic(err)
+		log.Println("Error listening:", err)
+		return
 	}
 
 	for {
 		conn, err := lsnr.Accept() // blocking call until a new connection is established
 		if err != nil {
-			panic(err)
+			log.Println("Error accepting connection:", err)
 		}
 
 		con_clients++
-		log.Println("New client connected:", conn.RemoteAddr(), "concurrent clients:", con_clients)
 
 		for {
 			cmd, err := readCommand(conn)
 			if err != nil {
 				conn.Close()
 				con_clients--
-				log.Println("Client disconnected:", conn.RemoteAddr(), "concurrent clients:", con_clients)
 				if err == io.EOF {
 					break
 				}
-				log.Println("Error reading command:", err)
 			}
 			respond(conn, cmd);
 		}

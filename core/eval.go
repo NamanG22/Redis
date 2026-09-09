@@ -2,12 +2,10 @@ package core
 
 import (
 	"errors"
-	"net"
-	"log"
+	"io"
 )
 
-func evalPING(args []string, conn net.Conn) error {
-	log.Println("Command received2:", args)
+func evalPING(args []string, conn io.ReadWriter) error {
 	var b []byte
 
 	if len(args) >= 2 {
@@ -22,8 +20,7 @@ func evalPING(args []string, conn net.Conn) error {
 	return err
 }
 
-func EvalAndRespond(cmd *RedisCmd, conn net.Conn) error {
-	log.Println("Command received1:", cmd)
+func EvalAndRespond(cmd *RedisCmd, conn io.ReadWriter) error {
 	switch cmd.Command {
 	case "PING":
 		return evalPING(cmd.Args, conn)

@@ -4,13 +4,19 @@ A from-scratch Redis clone. This repo starts with a TCP server — the networkin
 
 ## Current status
 
-The TCP path, RESP codec, and first command are wired together:
+The TCP path, RESP codec, and first command are wired together. `main` starts the **async** server.
 
-**Synchronous TCP server**
+**Async TCP server** (default, macOS / BSD `kqueue`)
 
 - Listens on `0.0.0.0:7379` by default (same port family as Redis, offset so it does not collide with a real Redis on `6379`)
-- Accepts one connection at a time (the accept loop is blocked while a client is being served)
-- Reads a RESP array from the client, turns it into a `RedisCmd`, evaluates it, and writes a RESP reply
+- Non-blocking sockets + `kqueue` so many clients can be ready at once (up to 20,000 registered FDs)
+- Accepts a connection, registers its FD, then on each readable event decodes a RESP array into a `RedisCmd` and writes a RESP reply
+- I/O on raw FDs goes through `core.FDComm` (`Read` / `Write` via `syscall`)
+
+**Synchronous TCP server** (still in tree, not started by `main`)
+
+- Accepts one connection at a time; the accept loop is blocked while that client is being served
+- Same decode → eval → reply path, over `net.Conn`
 
 **RESP codec** (`core.Decode` / `core.DecodeOne` / `core.Encode`)
 
@@ -24,14 +30,16 @@ The TCP path, RESP codec, and first command are wired together:
 - `PING <message>` → bulk-string echo of `<message>`
 - Wrong arity for `PING` → RESP error
 
-There is no key-value store, persistence, or further command set yet.
+There is no key-value store, persistence, or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
 
 ## Layout
 
 ```
-main.go              # flags and process entry
+main.go              # flags; starts RunAsyncTCPServer
 config/config.go     # host and port
-server/sync_tcp.go   # listen, accept, decode, respond
+server/async_tcp.go  # kqueue listen / accept / read loop
+server/sync_tcp.go   # blocking listen / accept / read loop
+core/comm.go         # FDComm (syscall Read/Write)
 core/cmd.go          # RedisCmd (command + args)
 core/eval.go         # command dispatch (PING)
 core/resp.go         # RESP encode / decode
@@ -42,6 +50,7 @@ go.mod
 ## Prerequisites
 
 - Go 1.27+
+- macOS or BSD (async server uses `kqueue`)
 
 ## Run
 
@@ -61,7 +70,7 @@ You should see logs like:
 
 ```
 rolling the dice
-Starting synchronous TCP server on 0.0.0.0 7379
+Starting async TCP server on port 0.0.0.0 7379
 ```
 
 ## Try it
@@ -88,7 +97,7 @@ printf '*1\r\n$4\r\nPING\r\n' | nc 127.0.0.1 7379
 
 Expected: `+PONG`
 
-Disconnect with `Ctrl-D` (or close the client); the server then accepts the next connection.
+Disconnect with `Ctrl-D` (or close the client). Other connections can stay open; the event loop keeps serving them.
 
 Flags:
 
@@ -107,4 +116,5 @@ go test ./core/
 
 1. Implement a small command set (`GET`, `SET`, …) and reject unknown commands
 2. Add an in-memory store
-3. Rebuild the same server in Java
+3. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
+4. Rebuild the same server in Java
