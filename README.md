@@ -4,7 +4,7 @@ A from-scratch Redis clone. This repo starts with a TCP server — the networkin
 
 ## Current status
 
-The TCP path, RESP codec, and first command are wired together. `main` starts the **async** server.
+The TCP path, RESP codec, in-memory store, and first commands are wired together. `main` starts the **async** server.
 
 **Async TCP server** (default, macOS / BSD `kqueue`)
 
@@ -22,15 +22,24 @@ The TCP path, RESP codec, and first command are wired together. `main` starts th
 
 - Parses simple strings (`+`), errors (`-`), integers (`:`), bulk strings (`$`), and arrays (`*`), including nested arrays
 - `DecodeArrayString` flattens a RESP array into `[]string` for command tokens
-- `Encode` writes simple strings (`+PONG`) and bulk strings (`$5\r\nhello\r\n`)
+- `Encode` writes simple strings (`+PONG`), bulk strings (`$5\r\nhello\r\n`), and integers (`:-1\r\n`)
+
+**In-memory store** (`core.Put` / `core.Get`)
+
+- Process-local `map[string]*Obj` (value + optional expiry in unix milliseconds)
+- No persistence, eviction, or background expiry sweep; `GET` / `TTL` treat an overdue key as missing
 
 **Commands**
 
 - `PING` → `+PONG`
 - `PING <message>` → bulk-string echo of `<message>`
-- Wrong arity for `PING` → RESP error
+- `SET key value` → `+OK`
+- `SET key value EX seconds` → `+OK` with a TTL
+- `GET key` → bulk string, or `$-1` if missing / expired
+- `TTL key` → seconds remaining, `-1` if no expiry, `-2` if missing / expired
+- Unknown command or wrong arity → RESP error
 
-There is no key-value store, persistence, or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
+There is no disk persistence or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
 
 ## Layout
 
@@ -41,7 +50,8 @@ server/async_tcp.go  # kqueue listen / accept / read loop
 server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
 core/cmd.go          # RedisCmd (command + args)
-core/eval.go         # command dispatch (PING)
+core/store.go        # in-memory map + Obj expiry
+core/eval.go         # command dispatch (PING, SET, GET, TTL)
 core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
 go.mod
@@ -89,6 +99,15 @@ redis-cli -p 7379 PING hello
 
 Expected: `hello`
 
+```bash
+redis-cli -p 7379 SET k v
+redis-cli -p 7379 GET k
+redis-cli -p 7379 SET tmp v EX 10
+redis-cli -p 7379 TTL tmp
+```
+
+Expected: `OK`, `v`, `OK`, then a TTL of `10` or just under.
+
 Or raw RESP over `nc`:
 
 ```bash
@@ -114,7 +133,7 @@ go test ./core/
 
 ## What comes next
 
-1. Implement a small command set (`GET`, `SET`, …) and reject unknown commands
-2. Add an in-memory store
+1. More commands (`DEL`, `EXISTS`, `EXPIRE`, …) and lazy delete of expired keys
+2. Persistence (RDB / AOF)
 3. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
 4. Rebuild the same server in Java

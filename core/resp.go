@@ -104,8 +104,11 @@ func Encode(value interface{}, isSimpleString bool) []byte {
 			return []byte(fmt.Sprintf("+%s\r\n", value.(string)))
 		}
 		return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(value.(string)), value.(string)))
+	case int64:
+		return []byte(fmt.Sprintf(":%d\r\n", value))
+	default:
+		return RESP_NIL
 	}
-	return []byte{}
 }
 
 func DecodeArrayString(data []byte) ([]string, error) {
