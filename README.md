@@ -24,7 +24,7 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - `DecodeArrayString` flattens a RESP array into `[]string` for command tokens
 - `Encode` writes simple strings (`+PONG`), bulk strings (`$5\r\nhello\r\n`), and integers (`:-1\r\n`)
 
-**In-memory store** (`core.Put` / `core.Get`)
+**In-memory store** (`core.Put` / `core.Get` / `core.Delete`)
 
 - Process-local `map[string]*Obj` (value + optional expiry in unix milliseconds)
 - No persistence, eviction, or background expiry sweep; `GET` / `TTL` treat an overdue key as missing
@@ -37,6 +37,8 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - `SET key value EX seconds` → `+OK` with a TTL
 - `GET key` → bulk string, or `$-1` if missing / expired
 - `TTL key` → seconds remaining, `-1` if no expiry, `-2` if missing / expired
+- `DEL key [key ...]` → count of keys removed
+- `EXPIRE key seconds` → `1` if a TTL was set, `0` if the key is missing
 - Unknown command or wrong arity → RESP error
 
 There is no disk persistence or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
@@ -51,7 +53,7 @@ server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
 core/cmd.go          # RedisCmd (command + args)
 core/store.go        # in-memory map + Obj expiry
-core/eval.go         # command dispatch (PING, SET, GET, TTL)
+core/eval.go         # command dispatch (PING, SET, GET, TTL, DEL, EXPIRE)
 core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
 go.mod
@@ -108,6 +110,13 @@ redis-cli -p 7379 TTL tmp
 
 Expected: `OK`, `v`, `OK`, then a TTL of `10` or just under.
 
+```bash
+redis-cli -p 7379 EXPIRE k 30
+redis-cli -p 7379 DEL k tmp
+```
+
+Expected: `1`, then `2` if both keys existed.
+
 Or raw RESP over `nc`:
 
 ```bash
@@ -133,7 +142,7 @@ go test ./core/
 
 ## What comes next
 
-1. More commands (`DEL`, `EXISTS`, `EXPIRE`, …) and lazy delete of expired keys
+1. More commands (`EXISTS`, …) and lazy delete of expired keys
 2. Persistence (RDB / AOF)
 3. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
 4. Rebuild the same server in Java
