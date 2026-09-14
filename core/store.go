@@ -3,6 +3,8 @@ package core
 import (
 	"log"
 	"time"
+
+	"github.com/NamanG22/Redis/config"
 )
 
 var store map[string]*Obj
@@ -25,6 +27,10 @@ func NewObj(value interface{}, expirationMs int64) *Obj {
 }
 
 func Put(key string, obj *Obj) {
+	// here I have hardcoded the max key limit, in redis this is configurable to memory limits
+	if len(store) >= config.MaxKeyLimit {
+		evict()
+	}
 	store[key] = obj
 }
 

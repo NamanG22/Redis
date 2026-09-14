@@ -30,7 +30,8 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - Process-local `map[string]*Obj` (value + optional expiry in unix milliseconds)
 - **Lazy expire:** `Get` deletes the key if `ExpiresAt` is in the past
 - **Active expire:** `CheckExpire` walks a sample of up to 20 keys and deletes overdue ones; it keeps sampling while more than 25% of the sample was expired (Redis-style)
-- No persistence or maxmemory eviction
+- **Eviction:** `Put` calls `evict` when `len(store) >= config.MaxKeyLimit` (default **5**). The current policy deletes one arbitrary key (`evictFirst` — first key from map iteration). Not LRU / LFU, and not Redis `maxmemory`
+- No disk persistence
 
 **Commands**
 
@@ -50,13 +51,14 @@ There is no disk persistence or further command set yet. The async path uses `kq
 
 ```
 main.go              # flags; starts RunAsyncTCPServer
-config/config.go     # host and port
+config/config.go     # host, port, MaxKeyLimit (default 5)
 server/async_tcp.go  # kqueue listen / accept / read loop
 server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
 core/cmd.go          # RedisCmd (command + args)
-core/store.go        # in-memory map + lazy expire on Get
+core/store.go        # in-memory map + lazy expire on Get + evict on Put
 core/expire.go       # sampled active expire (CheckExpire)
+core/eviction.go     # evictFirst when at MaxKeyLimit
 core/eval.go         # command dispatch (PING, SET, GET, TTL, DEL, EXPIRE)
 core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
@@ -138,6 +140,8 @@ Flags:
 | `-host`  | `0.0.0.0` | bind address |
 | `-port`  | `7379`    | bind port    |
 
+`MaxKeyLimit` is `5` in `config/config.go` (not a flag). A sixth distinct `SET` evicts one existing key.
+
 ## Test
 
 ```bash
@@ -147,6 +151,7 @@ go test ./core/
 ## What comes next
 
 1. More commands (`EXISTS`, …)
-2. Persistence (RDB / AOF)
-3. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
-4. Rebuild the same server in Java
+2. Better eviction (LRU / LFU) and a flag for `MaxKeyLimit`
+3. Persistence (RDB / AOF)
+4. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
+5. Rebuild the same server in Java
