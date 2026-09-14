@@ -4,12 +4,16 @@ import (
 	"log"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/NamanG22/Redis/config"
 	"github.com/NamanG22/Redis/core"
 )
 
 var con_clients int = 0
+
+var cronFrequency = 1 * time.Second
+var lastCronExecTime = time.Now()
 
 func RunAsyncTCPServer() error{
 	log.Println("Starting async TCP server on port", config.Host, config.Port)
@@ -55,6 +59,13 @@ func RunAsyncTCPServer() error{
 	}
 
 	for {
+
+		if(time.Now().After(lastCronExecTime.Add(cronFrequency))) {
+			log.Println("checking for expired keys")
+			core.CheckExpire()
+			lastCronExecTime = time.Now()
+		}
+
 		nevents, err := syscall.Kevent(kqueueFD, nil, events, nil)
 		if err != nil {
 			continue

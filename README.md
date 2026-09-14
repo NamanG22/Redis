@@ -12,6 +12,7 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - Non-blocking sockets + `kqueue` so many clients can be ready at once (up to 20,000 registered FDs)
 - Accepts a connection, registers its FD, then on each readable event decodes a RESP array into a `RedisCmd` and writes a RESP reply
 - I/O on raw FDs goes through `core.FDComm` (`Read` / `Write` via `syscall`)
+- About once a second (when the event loop wakes) runs `core.CheckExpire` to sample and drop overdue keys
 
 **Synchronous TCP server** (still in tree, not started by `main`)
 
@@ -27,7 +28,9 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 **In-memory store** (`core.Put` / `core.Get` / `core.Delete`)
 
 - Process-local `map[string]*Obj` (value + optional expiry in unix milliseconds)
-- No persistence, eviction, or background expiry sweep; `GET` / `TTL` treat an overdue key as missing
+- **Lazy expire:** `Get` deletes the key if `ExpiresAt` is in the past
+- **Active expire:** `CheckExpire` walks a sample of up to 20 keys and deletes overdue ones; it keeps sampling while more than 25% of the sample was expired (Redis-style)
+- No persistence or maxmemory eviction
 
 **Commands**
 
@@ -52,7 +55,8 @@ server/async_tcp.go  # kqueue listen / accept / read loop
 server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
 core/cmd.go          # RedisCmd (command + args)
-core/store.go        # in-memory map + Obj expiry
+core/store.go        # in-memory map + lazy expire on Get
+core/expire.go       # sampled active expire (CheckExpire)
 core/eval.go         # command dispatch (PING, SET, GET, TTL, DEL, EXPIRE)
 core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
@@ -142,7 +146,7 @@ go test ./core/
 
 ## What comes next
 
-1. More commands (`EXISTS`, …) and lazy delete of expired keys
+1. More commands (`EXISTS`, …)
 2. Persistence (RDB / AOF)
 3. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
 4. Rebuild the same server in Java
