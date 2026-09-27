@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 )
@@ -115,6 +116,14 @@ func Encode(value interface{}, isSimpleString bool) []byte {
 		return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(value.(string)), value.(string)))
 	case int64:
 		return []byte(fmt.Sprintf(":%d\r\n", value))
+	case []string:
+		elems := value.([]string)
+		var buf bytes.Buffer
+		buf.WriteString(fmt.Sprintf("*%d\r\n", len(elems)))
+		for _, elem := range elems {
+			buf.Write(Encode(elem, false))
+		}
+		return buf.Bytes()
 	default:
 		return RESP_NIL
 	}

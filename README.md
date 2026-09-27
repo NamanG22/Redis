@@ -28,7 +28,7 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 
 - Parses simple strings (`+`), errors (`-`), integers (`:`), bulk strings (`$`), and arrays (`*`), including nested arrays
 - `Decode` returns `[]interface{}` (one entry per top-level value in the buffer)
-- `Encode` writes simple strings (`+PONG`), bulk strings (`$5\r\nhello\r\n`), and integers (`:-1\r\n`)
+- `Encode` writes simple strings (`+PONG`), bulk strings (`$5\r\nhello\r\n`), integers (`:-1\r\n`), and string arrays (RESP `*` of bulk strings — used for AOF)
 - Command handlers return encoded `[]byte`; the server writes them (errors are encoded as bulk/simple strings today, not `-ERR` prefixes)
 
 **In-memory store** (`core.Put` / `core.Get` / `core.Delete`)
@@ -37,7 +37,13 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - **Lazy expire:** `Get` deletes the key if `ExpiresAt` is in the past
 - **Active expire:** `CheckExpire` walks a sample of up to 20 keys and deletes overdue ones; it keeps sampling while more than 25% of the sample was expired (Redis-style)
 - **Eviction:** `Put` calls `evict` when `len(store) >= config.MaxKeyLimit` (default **5**). The current policy deletes one arbitrary key (`evictFirst` — first key from map iteration). Not LRU / LFU, and not Redis `maxmemory`
-- No disk persistence
+
+**AOF rewrite** (`core.DumpAllAOF` / `BGREWRITEAOF`)
+
+- Writes the current live store as RESP `SET key value` commands into `config.AOFFile` (default `master.aof`)
+- Rewrite is atomic: write `master.aof.tmp`, then rename over the old file (does not append history)
+- Expired keys are skipped via `Get`; deleted keys are omitted on the next rewrite
+- **Not yet:** append-on-write for every mutating command, or load/replay AOF on startup
 
 **Commands**
 
@@ -49,15 +55,16 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - `TTL key` → seconds remaining, `-1` if no expiry, `-2` if missing / expired
 - `DEL key [key ...]` → count of keys removed
 - `EXPIRE key seconds` → `1` if a TTL was set, `0` if the key is missing
+- `BGREWRITEAOF` → rewrite `master.aof` from the current store → `+OK`
 - Unknown command or wrong arity → RESP error
 
-There is no disk persistence or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
+There is no AOF replay on boot or further command set yet. The async path uses `kqueue`, so it is not portable to Linux (`epoll`) yet.
 
 ## Layout
 
 ```
 main.go              # flags; starts RunAsyncTCPServer
-config/config.go     # host, port, MaxKeyLimit (default 5)
+config/config.go     # host, port, MaxKeyLimit, AOFFile
 server/async_tcp.go  # kqueue listen / accept / read loop
 server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
@@ -65,7 +72,9 @@ core/cmd.go          # RedisCmd / RedisCmds (command batch)
 core/store.go        # in-memory map + lazy expire on Get + evict on Put
 core/expire.go       # sampled active expire (CheckExpire)
 core/eviction.go     # evictFirst when at MaxKeyLimit
-core/eval.go         # command dispatch (PING, SET, GET, TTL, DEL, EXPIRE)
+core/aof.go          # DumpAllAOF rewrite to master.aof
+core/aof_test.go     # AOF rewrite tests
+core/eval.go         # command dispatch (+ BGREWRITEAOF)
 core/resp.go         # RESP encode / decode
 core/resp_test.go    # table-driven decode tests
 go.mod
@@ -129,6 +138,13 @@ redis-cli -p 7379 DEL k tmp
 
 Expected: `1`, then `2` if both keys existed.
 
+```bash
+redis-cli -p 7379 SET k v
+redis-cli -p 7379 BGREWRITEAOF
+```
+
+Expected: `OK`, then `OK`. The process writes a compact RESP dump of live keys to `master.aof` in the working directory.
+
 Or raw RESP over `nc`:
 
 ```bash
@@ -154,7 +170,7 @@ Flags:
 | `-host`  | `0.0.0.0` | bind address |
 | `-port`  | `7379`    | bind port    |
 
-`MaxKeyLimit` is `5` in `config/config.go` (not a flag). A sixth distinct `SET` evicts one existing key.
+`MaxKeyLimit` is `5` and `AOFFile` is `master.aof` in `config/config.go` (not flags). A sixth distinct `SET` evicts one existing key.
 
 ## Test
 
@@ -164,8 +180,9 @@ go test ./core/
 
 ## What comes next
 
-1. More commands (`EXISTS`, …)
-2. Better eviction (LRU / LFU) and a flag for `MaxKeyLimit`
-3. Persistence (RDB / AOF)
-4. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
-5. Rebuild the same server in Java
+1. Append every mutating command to the AOF, and load/replay `master.aof` on startup
+2. Preserve TTLs in the rewrite (`SET` + `EX` / `PEXPIREAT`)
+3. More commands (`EXISTS`, …)
+4. Better eviction (LRU / LFU) and a flag for `MaxKeyLimit`
+5. Linux `epoll` (or a portable multiplexer) so the async server is not macOS-only
+6. Rebuild the same server in Java

@@ -1,11 +1,12 @@
 package core
 
 import (
-	"time"
 	"strconv"
+	"time"
 )
 
 var RESP_NIL []byte = []byte("$-1\r\n")
+var RESP_OK []byte = []byte("+OK\r\n")
 
 func evalPING(args []string) []byte {
 	var b []byte
@@ -14,9 +15,9 @@ func evalPING(args []string) []byte {
 		return Encode("ERR wrong number of arguments for 'ping' command", false)
 	}
 	if len(args) == 0 {
-		b = Encode("PONG",true);
+		b = Encode("PONG", true)
 	} else {
-		b = Encode(args[0],false);
+		b = Encode(args[0], false)
 	}
 	return b
 }
@@ -37,16 +38,16 @@ func evalSET(args []string) []byte {
 			}
 			expirationSec, err := strconv.ParseInt(args[i], 10, 64)
 			if err != nil {
-				return Encode("ERR invalid expiration time '" + args[i] + "'", false)
+				return Encode("ERR invalid expiration time '"+args[i]+"'", false)
 			}
 			expirationMs = expirationSec * 1000
 		default:
-			return Encode("ERR unknown option '" + args[i] + "'", false)
+			return Encode("ERR unknown option '"+args[i]+"'", false)
 		}
 	}
 
 	Put(key, NewObj(value, expirationMs))
-	return Encode("OK", true)
+	return RESP_OK
 }
 
 func evalGET(args []string) []byte {
@@ -103,7 +104,7 @@ func evalEXPIRE(args []string) []byte {
 	key := args[0]
 	duration, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
-		return Encode("ERR invalid expiration time '" + args[1] + "'", false)
+		return Encode("ERR invalid expiration time '"+args[1]+"'", false)
 	}
 	obj := Get(key)
 
@@ -111,8 +112,15 @@ func evalEXPIRE(args []string) []byte {
 		return Encode(int64(0), true)
 	}
 
-	obj.ExpiresAt = time.Now().UnixMilli() + duration * 1000
+	obj.ExpiresAt = time.Now().UnixMilli() + duration*1000
 	return Encode(int64(1), true)
+}
+
+func evalBGREWRITEAOF(args []string) []byte {
+	if err := DumpAllAOF(); err != nil {
+		return Encode("ERR "+err.Error(), false)
+	}
+	return RESP_OK
 }
 
 func EvalAndRespond(cmd *RedisCmd) []byte {
@@ -129,7 +137,9 @@ func EvalAndRespond(cmd *RedisCmd) []byte {
 		return evalDEL(cmd.Args)
 	case "EXPIRE":
 		return evalEXPIRE(cmd.Args)
+	case "BGREWRITEAOF":
+		return evalBGREWRITEAOF(cmd.Args)
 	default:
-		return Encode("ERR unknown command '" + cmd.Command + "'", false)
+		return Encode("ERR unknown command '"+cmd.Command+"'", false)
 	}
 }
