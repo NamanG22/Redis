@@ -87,14 +87,23 @@ func DecodeOne(data []byte) (interface{}, int, error) {
 	return nil, 0, nil
 }
 
-func Decode(data []byte) (interface{}, error) {
+func Decode(data []byte) ([]interface{}, error) {
+	// decode multiple arrays of inputs like [[SET,k,v], [GET,k]] into individual items like [SET,k,v], [GET,k]
 	if len(data) == 0 {
 		return nil, errors.New("no data")
 	}
 
-	value, _, err := DecodeOne(data)
-	return value, err
-
+	var index int = 0
+	var values []interface{} = make([]interface{}, 0)
+	for index < len(data) {
+		value, delta, err := DecodeOne(data[index:])
+		if err != nil {
+			return nil, errors.New("error decoding data")
+		}
+		index += delta
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 func Encode(value interface{}, isSimpleString bool) []byte {
@@ -109,17 +118,4 @@ func Encode(value interface{}, isSimpleString bool) []byte {
 	default:
 		return RESP_NIL
 	}
-}
-
-func DecodeArrayString(data []byte) ([]string, error) {
-	value, err := Decode(data)
-	if err != nil {
-		return nil, err
-	}
-	array := value.([]interface{})
-	tokens := make([]string, len(array))
-	for i := range tokens {
-		tokens[i] = array[i].(string)
-	}
-	return tokens, nil
 }

@@ -10,7 +10,7 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 
 - Listens on `0.0.0.0:7379` by default (same port family as Redis, offset so it does not collide with a real Redis on `6379`)
 - Non-blocking sockets + `kqueue` so many clients can be ready at once (up to 20,000 registered FDs)
-- Accepts a connection, registers its FD, then on each readable event decodes a RESP array into a `RedisCmd` and writes a RESP reply
+- Accepts a connection, registers its FD, then on each readable event decodes one or more RESP values into `RedisCmds`, evaluates them, and writes a concatenated RESP reply
 - I/O on raw FDs goes through `core.FDComm` (`Read` / `Write` via `syscall`)
 - About once a second (when the event loop wakes) runs `core.CheckExpire` to sample and drop overdue keys
 
@@ -19,11 +19,17 @@ The TCP path, RESP codec, in-memory store, and first commands are wired together
 - Accepts one connection at a time; the accept loop is blocked while that client is being served
 - Same decode → eval → reply path, over `net.Conn`
 
+**Pipelining**
+
+- `core.Decode` walks the whole read buffer and returns every top-level RESP value (e.g. two command arrays from one `redis-cli --pipe` or pipelined write)
+- Each value becomes a `RedisCmd`; replies are buffered and flushed in one `Write`
+
 **RESP codec** (`core.Decode` / `core.DecodeOne` / `core.Encode`)
 
 - Parses simple strings (`+`), errors (`-`), integers (`:`), bulk strings (`$`), and arrays (`*`), including nested arrays
-- `DecodeArrayString` flattens a RESP array into `[]string` for command tokens
+- `Decode` returns `[]interface{}` (one entry per top-level value in the buffer)
 - `Encode` writes simple strings (`+PONG`), bulk strings (`$5\r\nhello\r\n`), and integers (`:-1\r\n`)
+- Command handlers return encoded `[]byte`; the server writes them (errors are encoded as bulk/simple strings today, not `-ERR` prefixes)
 
 **In-memory store** (`core.Put` / `core.Get` / `core.Delete`)
 
@@ -55,7 +61,7 @@ config/config.go     # host, port, MaxKeyLimit (default 5)
 server/async_tcp.go  # kqueue listen / accept / read loop
 server/sync_tcp.go   # blocking listen / accept / read loop
 core/comm.go         # FDComm (syscall Read/Write)
-core/cmd.go          # RedisCmd (command + args)
+core/cmd.go          # RedisCmd / RedisCmds (command batch)
 core/store.go        # in-memory map + lazy expire on Get + evict on Put
 core/expire.go       # sampled active expire (CheckExpire)
 core/eviction.go     # evictFirst when at MaxKeyLimit
@@ -130,6 +136,14 @@ printf '*1\r\n$4\r\nPING\r\n' | nc 127.0.0.1 7379
 ```
 
 Expected: `+PONG`
+
+Pipelined raw RESP (two commands, one write):
+
+```bash
+printf '*1\r\n$4\r\nPING\r\n*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n' | nc 127.0.0.1 7379
+```
+
+Expected replies concatenated: `+PONG` then `+OK`.
 
 Disconnect with `Ctrl-D` (or close the client). Other connections can stay open; the event loop keeps serving them.
 

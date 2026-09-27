@@ -167,13 +167,20 @@ func TestDecodeOne(t *testing.T) {
 func TestDecode(t *testing.T) {
 	tests := []struct {
 		data []byte
-		want interface{}
+		want []interface{}
 	}{
-		{[]byte("+OK\r\n"), "OK"},
-		{[]byte("-Error\r\n"), "Error"},
-		{[]byte(":1000\r\n"), int64(1000)},
-		{[]byte("$5\r\nhello\r\n"), "hello"},
-		{[]byte("*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n"), []interface{}{"hello", "world"}},
+		{[]byte("+OK\r\n"), []interface{}{"OK"}},
+		{[]byte("-Error\r\n"), []interface{}{"Error"}},
+		{[]byte(":1000\r\n"), []interface{}{int64(1000)}},
+		{[]byte("$5\r\nhello\r\n"), []interface{}{"hello"}},
+		{[]byte("*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n"), []interface{}{[]interface{}{"hello", "world"}}},
+		// pipelined: two top-level values in one buffer
+		{[]byte("+OK\r\n:42\r\n"), []interface{}{"OK", int64(42)}},
+		{[]byte("*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n*2\r\n$3\r\nGET\r\n$1\r\nk\r\n"),
+			[]interface{}{
+				[]interface{}{"SET", "k", "v"},
+				[]interface{}{"GET", "k"},
+			}},
 	}
 
 	for _, tt := range tests {
@@ -190,11 +197,11 @@ func TestDecode(t *testing.T) {
 
 func TestArrayDecode(t *testing.T) {
 	cases := map[string][]interface{}{
-		"*0\r\n":                                                   {},
-		"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n":                     {"hello", "world"},
-		"*3\r\n:1\r\n:2\r\n:3\r\n":                                 {int64(1), int64(2), int64(3)},
-		"*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$5\r\nhello\r\n":            {int64(1), int64(2), int64(3), int64(4), "hello"},
-		"*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Hello\r\n-World\r\n": {[]interface{}{int64(1), int64(2), int64(3)}, []interface{}{"Hello", "World"}},
+		"*0\r\n":                                                   {[]interface{}{}},
+		"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n":                     {[]interface{}{"hello", "world"}},
+		"*3\r\n:1\r\n:2\r\n:3\r\n":                                 {[]interface{}{int64(1), int64(2), int64(3)}},
+		"*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$5\r\nhello\r\n":            {[]interface{}{int64(1), int64(2), int64(3), int64(4), "hello"}},
+		"*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Hello\r\n-World\r\n": {[]interface{}{[]interface{}{int64(1), int64(2), int64(3)}, []interface{}{"Hello", "World"}}},
 	}
 
 	for data, want := range cases {

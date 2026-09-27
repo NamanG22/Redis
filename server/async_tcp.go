@@ -99,14 +99,14 @@ func RunAsyncTCPServer() error{
 			} else{
 				comm :=  core.FDComm{
 					FD: int(events[i].Ident)}
-				cmd, err := readCommand(comm)
+				cmds, err := readCommands(comm)
 				if err != nil {
 					syscall.Close(int(events[i].Ident))
 					con_clients--
 					log.Println("client disconnected", con_clients)
 					continue
 				}
-				respond(comm, cmd)
+				respond(comm, cmds)
 			}
 		}
 	}
